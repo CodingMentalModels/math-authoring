@@ -5,15 +5,21 @@ pub struct TypeHierarchyNode {
     children: Vec<TypeHierarchyNode>,
 }
 
-impl Into<TypeHierarchyNode> for CompoundType {
-    fn into(self) -> TypeHierarchyNode {
-        TypeHierarchyNode::singleton(self)
+impl From<CompoundType> for TypeHierarchyNode {
+    fn from(val: CompoundType) -> Self {
+        TypeHierarchyNode::singleton(val)
     }
 }
 
-impl Into<TypeHierarchyNode> for SimpleType {
-    fn into(self) -> TypeHierarchyNode {
-        TypeHierarchyNode::singleton(self)
+impl From<SimpleType> for TypeHierarchyNode {
+    fn from(val: SimpleType) -> Self {
+        TypeHierarchyNode::singleton(val)
+    }
+}
+
+impl From<&str> for TypeHierarchyNode {
+    fn from(val: &str) -> Self {
+        TypeHierarchyNode::singleton(Into::<CompoundType>::into(val))
     }
 }
 
@@ -70,7 +76,7 @@ impl TypeHierarchyNode {
         let rhs = rhs.into();
         if lhs == rhs {
             true
-        } else if (rhs == self.contents) {
+        } else if rhs == self.contents {
             self.children.iter().any(|child| child.contains(lhs.clone()))
         } else {
             self.children.iter().any(|child| child.subtype_eq(lhs.clone(), rhs.clone()))
@@ -95,10 +101,16 @@ pub struct CompoundType {
 
 impl From<SimpleType> for CompoundType {
     fn from(simple_type: SimpleType) -> Self {
-        CompoundType {
-            types: vec![simple_type],
-        }
+        Self::simple(simple_type)
     }
+}
+
+impl From<&str> for CompoundType {
+
+    fn from(simple_type: &str) -> Self {
+        Self::simple(simple_type)
+    }
+
 }
 
 impl CompoundType {
@@ -106,6 +118,11 @@ impl CompoundType {
         CompoundType { types }
     }
 
+    pub fn simple(simple_type: impl Into<SimpleType>) -> Self {
+        CompoundType {
+            types: vec![simple_type.into()],
+        }
+    }
     pub fn get_types(&self) -> &Vec<SimpleType> {
         &self.types
     }
@@ -116,6 +133,14 @@ impl CompoundType {
 pub enum SimpleType {
     Object,
     Custom(String),
+}
+
+impl From<&str> for SimpleType {
+
+    fn from(simple_type: &str) -> Self {
+        Self::Custom(simple_type.to_string())
+    }
+
 }
 
 impl SimpleType {
@@ -199,6 +224,6 @@ mod test_types {
         assert!(!hierarchy.subtype(SimpleType::new("Rational"), SimpleType::new("Integer")));
         assert!(!hierarchy.subtype(SimpleType::new("Irrational"), SimpleType::new("Integer")));
         assert!(!hierarchy.subtype(SimpleType::Object, SimpleType::new("Integer")));
-        
+
     }
 }
