@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::math::types::{CompoundType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,7 +71,7 @@ impl Quantifier {
         quantifiers.iter().map(|quantifier| quantifier.substitute(from_symbol, to_symbol)).collect()
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct SymbolNode {
     symbol: Symbol,
     children: Vec<SymbolNode>,
@@ -117,9 +119,25 @@ impl SymbolNode {
         };
         SymbolNode::new(contents, self.children.iter().map(|child| child.substitute(from_symbol, to_symbol)).collect())
     }
+
+    pub fn substitute_all(&self, substitutions: &HashMap<Symbol, Symbol>) -> Self {
+        let from_to_unambiguous: HashMap<Symbol, Symbol> = substitutions.iter().enumerate().map(|(i, (from, to))| (Symbol::new(&i.to_string()), from.clone())).collect();
+        let to_to_unambiguous: HashMap<Symbol, Symbol> = substitutions.iter().enumerate().map(|(i, (from, to))| (Symbol::new(&i.to_string()), to.clone())).collect();
+
+        self.substitute_all_unchecked(&from_to_unambiguous).substitute_all_unchecked(&to_to_unambiguous)
+    }
+
+    fn substitute_all_unchecked(&self, substitutions: &HashMap<Symbol, Symbol>) -> Self {
+        let mut to_return = self.clone();
+        for (from, to) in substitutions {
+            to_return = to_return.substitute(&from, &to);
+        }
+        return to_return;
+    }
+
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Symbol {
     name: String,
 }
@@ -185,5 +203,43 @@ mod test_statement {
         
         assert_eq!(transformed, x_equals_z);
 
+    }
+
+    #[test]
+    fn test_symbol_tree_substitutes() {
+        
+        let symbol_tree = SymbolNode::ternary("+", "a", "b", "c");
+        assert_eq!(symbol_tree.substitute(&"b".into(), &"d".into()), SymbolNode::ternary("+", "a", "d", "c"));
+        assert_eq!(symbol_tree.substitute(&"c".into(), &"d".into()), SymbolNode::ternary("+", "a", "b", "d"));
+        assert_eq!(symbol_tree.substitute(&"a".into(), &"d".into()), SymbolNode::ternary("+", "d", "b", "c"));
+
+        assert_eq!(
+            symbol_tree.substitute_all(
+                &vec![("a".into(), "d".into()), ("b".into(), "e".into()), ("c".into(), "f".into())].into_iter().collect()
+            ),
+            SymbolNode::ternary("+", "d", "e", "f")
+        );
+
+        assert_eq!(
+            symbol_tree.substitute_all(
+                &vec![("a".into(), "d".into()), ("b".into(), "d".into()), ("c".into(), "d".into())].into_iter().collect()
+            ),
+            SymbolNode::ternary("+", "d", "d", "d")
+        );
+
+        
+        assert_eq!(
+            symbol_tree.substitute_all(
+                &vec![("a".into(), "d".into()), ("b".into(), "d".into())].into_iter().collect()
+            ),
+            SymbolNode::ternary("+", "d", "d", "c")
+        );
+
+        assert_eq!(
+            symbol_tree.substitute_all(
+                &vec![("a".into(), "b".into()), ("b".into(), "c".into())].into_iter().collect()
+            ),
+            SymbolNode::ternary("+", "d", "b", "d")
+        );
     }
 }
