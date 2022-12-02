@@ -11,9 +11,9 @@ Goal: Create a user friendly authoring system for doing math, which allows the u
 ## Key Ideas
 - We aren't trying to create a proof system / proof assistant.  We're trying to create a helpful tool for performing mathematical manipulations, analogous to a word processor for writing or an IDE for coding.
 - To do this, we'll use quantified first order logic over a type system that has some templatization (analogous to generics).  
-- Whenever we're tempted to say $\forall x \in X \enspace x \in P$ where $X$ is some `Type` and $P$ is some property or predicate, we can instead say $\forall x \in X \enspace \exists p \in P \enspace x = p$.  
+- Whenever we're tempted to say $\forall x \in X \enspace x \in P$ or $\forall x \in X \enspace P(x)$ where $X$ is some `Type` and $P$ is some property or predicate, we can instead say $\forall x \in X \enspace \exists p \in P \enspace x = p$.  
 - Allowing users to specify which transformations are allowable in their system provides a lot of flexibility and punts the correctness, completeness, etc. of the system to the user.
-- Predefining some transformations is nice, similar to the standard library in a language.
+- Predefining some objects, types, transformations is nice, similar to the standard library in a programming language.
 
 ## User Stories
 
@@ -57,7 +57,12 @@ This obviously seems very tedious, but **a lot** of it can be hidden from the us
 
 ### Algebra
 
-
+$$
+\frac{x^2}{x^4 + 1} = 1/7 \\
+7x^2 = x^4 + 1 \\
+x^4 - 7x^2 + 1 = 0 \\
+x^2 = \frac{7 \pm \sqrt{45}}{2}
+$$
 
 ### Proofs
 
