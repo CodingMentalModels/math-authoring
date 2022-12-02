@@ -56,7 +56,7 @@ pub enum Quantifier {
 
 impl Quantifier {
 
-    pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> Quantifier {
+    pub fn substitute(&self, _from_symbol: &Symbol, _to_symbol: &Symbol) -> Quantifier {
         match self {
             Quantifier::All(symbol, compound_type) => Quantifier::All(symbol.clone(), compound_type.clone()),
             Quantifier::Exists(symbol, compound_type) => Quantifier::Exists(symbol.clone(), compound_type.clone()),
