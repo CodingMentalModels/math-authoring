@@ -61,7 +61,7 @@ impl Statement {
     }
 
     pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> Result<Statement, String> {
-        Ok(Statement::new(Quantifier::substitute_several(&self.quantifiers, from_symbol, to_symbol)?, self.subject.substitute(from_symbol, to_symbol)))
+        Ok(Statement::new(Quantifier::substitute_several(&self.quantifiers, from_symbol, to_symbol), self.subject.substitute(from_symbol, to_symbol)))
     }
 
     pub fn substitute_all(&self, mapping: &HashMap<Symbol, Symbol>) -> Result<Statement, String> {
@@ -103,6 +103,15 @@ impl Quantifier {
         }
     }
 
+    pub fn get_type(&self) -> CompoundType {
+        match self {
+            Quantifier::All(_, compound_type) => compound_type.clone(),
+            Quantifier::Exists(_, compound_type) => compound_type.clone(),
+            Quantifier::NotAll(_, compound_type) => compound_type.clone(),
+            Quantifier::NotExists(_, compound_type) => compound_type.clone(),
+        }
+    }
+
     pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> Quantifier {
         if &self.get_symbol() != from_symbol {
             return self.clone();
@@ -115,21 +124,44 @@ impl Quantifier {
         }
     }
 
-    pub fn substitute_several(quantifiers: &Vec<Self>, from_symbol: &Symbol, to_symbol: &Symbol) -> Result<Vec<Self>, String> {
-        let to_return = quantifiers.iter().map(|quantifier| quantifier.substitute(from_symbol, to_symbol)).collect();
-        if Self::is_duplicative(&to_return) {
-            Err(format!("Quantifiers {:?} are duplicative", quantifiers))
-        } else {
-            Ok(to_return)
-        }
+    fn substitute_several(quantifiers: &Vec<Self>, from_symbol: &Symbol, to_symbol: &Symbol) -> Vec<Self> {
+        quantifiers.iter().map(|quantifier| quantifier.substitute(from_symbol, to_symbol)).collect()
     }
 
     pub fn substitute_several_all(quantifiers: &Vec<Self>, mapping: &HashMap<Symbol, Symbol>) -> Result<Vec<Self>, String> {
         let mut new_quantifiers = quantifiers.clone();
         for (from_symbol, to_symbol) in mapping {
-            new_quantifiers = Quantifier::substitute_several(&new_quantifiers, &from_symbol, &to_symbol)?;
+            new_quantifiers = Quantifier::reconcile(Quantifier::substitute_several(&new_quantifiers, &from_symbol, &to_symbol))?;
         }
         Ok(new_quantifiers)
+    }
+
+    fn reconcile(quantifiers: Vec<Self>) -> Result<Vec<Self>, String> {
+        let mut offset_quantifiers: Vec<Option<Quantifier>> = quantifiers.clone().into_iter().map(|x| Some(x)).skip(1).collect();
+        offset_quantifiers.push(None);
+        let to_return: Result<Vec<Quantifier>, String> = quantifiers.into_iter().zip(offset_quantifiers).filter_map(|(first, second)| {
+            if second.is_none() {
+                return Some(Ok(first));
+            }
+            let second = second.unwrap();
+            if first.get_symbol() == second.get_symbol() {
+                if first.get_type() != second.get_type() {
+                    return Some(Err(format!("Quantifiers can't be reconciled as they have different types: {:?} and {:?}", first, second)));
+                }
+                match (&first, &second) {
+                    (Quantifier::All(_, _), Quantifier::All(_, _)) => None,
+                    (Quantifier::NotExists(_, _), Quantifier::NotExists(_, _)) => None,
+                    (_, _) => Some(Err(format!("Quantifiers can't be reconciled as they aren't universal: {:?} and {:?}", first, second))),
+                }
+            } else {
+                Some(Ok(first))
+            }
+        }).collect();
+        let to_return = to_return?;
+        if Self::is_duplicative(&to_return) {
+            return Err(format!("Quantifiers can't be reconciled as they aren't adjacent: {:?}", to_return));
+        }
+        Ok(to_return)
     }
 
     pub fn is_duplicative(quantifiers: &Vec<Self>) -> bool {
@@ -413,7 +445,6 @@ mod test_statement {
         let expected = Statement::new(
             vec![
                 Quantifier::Exists("=".into(), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
-                Quantifier::All("a".into(), SimpleType::Object.into()),
                 Quantifier::All("a".into(), SimpleType::Object.into()),
             ],
             SymbolNode::new(
