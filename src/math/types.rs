@@ -103,14 +103,11 @@ pub struct CompoundType {
 
 impl Display for CompoundType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let mut first = true;
-        for t in self.types.iter() {
-            if first {
-                first = false;
-            } else {
-                write!(f, " x ")?;
-            }
-            write!(f, "{}", t)?;
+        assert!(self.types.len() > 0);
+        if self.types.len() == 1 {
+            write!(f, "{}", self.types[0])?
+        } else {
+            write!(f, "({})", self.types.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(" x "))?
         }
         Ok(())
     }
@@ -155,7 +152,7 @@ pub enum SimpleType {
 impl Display for SimpleType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            SimpleType::Object => write!(f, "Object"),
+            SimpleType::Object => write!(f, "Obj"),
             SimpleType::Custom(name) => write!(f, "{}", name),
         }
     }
