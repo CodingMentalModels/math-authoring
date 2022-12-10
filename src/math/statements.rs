@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::{Display, Formatter, self}};
+use std::{collections::{HashMap, HashSet}, fmt::{Display, Formatter, self}, error::Error};
 
 use crate::math::types::{CompoundType};
 
@@ -31,12 +31,12 @@ impl Transformation {
     }
 
     pub fn transform(&self, statement: &Statement, mapping: &HashMap<Symbol, Symbol>) -> Result<Statement, String> {
-        let mapped_transform = self.substitute_all(mapping);
+        let mapped_transform = self.substitute_all(mapping)?;
         mapped_transform.transform_strict(statement)
     }
 
-    pub fn substitute_all(&self, mapping: &HashMap<Symbol, Symbol>) -> Transformation {
-        Transformation::new(self.from.substitute_all(mapping), self.to.substitute_all(mapping))
+    pub fn substitute_all(&self, mapping: &HashMap<Symbol, Symbol>) -> Result<Transformation, String> {
+        Ok(Transformation::new(self.from.substitute_all(mapping)?, self.to.substitute_all(mapping)?))
     }
 
 }
@@ -60,19 +60,19 @@ impl Statement {
         Statement { quantifiers, subject: subject.into() }
     }
 
-    pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> Statement {
-        Statement::new(Quantifier::substitute_several(&self.quantifiers, from_symbol, to_symbol), self.subject.substitute(from_symbol, to_symbol))
+    pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> Result<Statement, String> {
+        Ok(Statement::new(Quantifier::substitute_several(&self.quantifiers, from_symbol, to_symbol)?, self.subject.substitute(from_symbol, to_symbol)))
     }
 
-    pub fn substitute_all(&self, mapping: &HashMap<Symbol, Symbol>) -> Statement {
-        let quantifiers = Quantifier::substitute_several_all(&self.quantifiers, mapping);
+    pub fn substitute_all(&self, mapping: &HashMap<Symbol, Symbol>) -> Result<Statement, String> {
+        let quantifiers = Quantifier::substitute_several_all(&self.quantifiers, mapping)?;
         let subject = self.subject.clone().substitute_all(mapping);
-        Statement::new(quantifiers, subject)
+        Ok(Statement::new(quantifiers, subject))
     }
 }
 
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Quantifier {
     All(Symbol, CompoundType),
     Exists(Symbol, CompoundType),
@@ -115,16 +115,25 @@ impl Quantifier {
         }
     }
 
-    pub fn substitute_several(quantifiers: &Vec<Self>, from_symbol: &Symbol, to_symbol: &Symbol) -> Vec<Self> {
-        quantifiers.iter().map(|quantifier| quantifier.substitute(from_symbol, to_symbol)).collect()
+    pub fn substitute_several(quantifiers: &Vec<Self>, from_symbol: &Symbol, to_symbol: &Symbol) -> Result<Vec<Self>, String> {
+        let to_return = quantifiers.iter().map(|quantifier| quantifier.substitute(from_symbol, to_symbol)).collect();
+        if Self::is_duplicative(&to_return) {
+            Err(format!("Quantifiers {:?} are duplicative", quantifiers))
+        } else {
+            Ok(to_return)
+        }
     }
 
-    pub fn substitute_several_all(quantifiers: &Vec<Self>, mapping: &HashMap<Symbol, Symbol>) -> Vec<Self> {
+    pub fn substitute_several_all(quantifiers: &Vec<Self>, mapping: &HashMap<Symbol, Symbol>) -> Result<Vec<Self>, String> {
         let mut new_quantifiers = quantifiers.clone();
         for (from_symbol, to_symbol) in mapping {
-            new_quantifiers = Quantifier::substitute_several(&new_quantifiers, &from_symbol, &to_symbol);
+            new_quantifiers = Quantifier::substitute_several(&new_quantifiers, &from_symbol, &to_symbol)?;
         }
-        new_quantifiers
+        Ok(new_quantifiers)
+    }
+
+    pub fn is_duplicative(quantifiers: &Vec<Self>) -> bool {
+        quantifiers.iter().collect::<HashSet<_>>().len() != quantifiers.len()
     }
 
 }
@@ -273,7 +282,7 @@ mod test_statement {
                 ],
             ),
         );
-        let x_equals_z = x_equals_y.substitute(&"y".into(), &"z".into());
+        let x_equals_z = x_equals_y.substitute(&"y".into(), &"z".into()).unwrap();
 
         let transformation = Transformation::new(
             x_equals_y.clone(),
@@ -375,7 +384,7 @@ mod test_statement {
             ),
         );
 
-        let x_to_a = statement.substitute(&"x".into(), &"a".into());
+        let x_to_a = statement.substitute(&"x".into(), &"a".into()).unwrap();
 
         let expected = Statement::new(
             vec![
@@ -399,7 +408,7 @@ mod test_statement {
                 ("x".into(), "a".into()),
                 ("y".into(), "a".into()),
             ].into_iter().collect()
-        );
+        ).unwrap();
 
         let expected = Statement::new(
             vec![
@@ -425,6 +434,25 @@ mod test_statement {
         
         let quantifier = Quantifier::All("x".into(), SimpleType::Object.into());
         assert_eq!(quantifier.substitute(&Symbol::from("x"), &Symbol::from("a")), Quantifier::All("a".into(), SimpleType::Object.into()));
+    
+        let quantifiers = vec![
+            Quantifier::All("x".into(), SimpleType::Object.into()),
+            Quantifier::All("y".into(), SimpleType::Object.into()),
+            Quantifier::All("z".into(), SimpleType::Object.into()),
+        ];
+        assert_eq!(Quantifier::substitute_several_all(&quantifiers, 
+            &vec![
+                ("x".into(), "a".into()),
+                ("y".into(), "b".into()),
+                ("z".into(), "c".into()),
+            ].into_iter().collect(),
+        ).unwrap(),
+            vec![
+                Quantifier::All("a".into(), SimpleType::Object.into()),
+                Quantifier::All("b".into(), SimpleType::Object.into()),
+                Quantifier::All("c".into(), SimpleType::Object.into()),
+            ]
+        );
     }
     
     #[test]

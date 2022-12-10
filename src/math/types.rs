@@ -96,7 +96,7 @@ impl TypeHierarchyNode {
 
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct CompoundType {
     types: Vec<SimpleType>,
 }
@@ -143,7 +143,7 @@ impl CompoundType {
 
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum SimpleType {
     Object,
     Custom(String),
