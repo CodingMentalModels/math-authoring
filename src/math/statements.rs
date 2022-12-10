@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::{Display, Formatter, self}};
 
 use crate::math::types::{CompoundType};
 
@@ -22,19 +22,32 @@ impl Transformation {
         &self.to
     }
 
-    pub fn transform(&self, statement: &Statement) -> Result<Statement, String> {
+    pub fn transform_strict(&self, statement: &Statement) -> Result<Statement, String> {
         if statement == &self.from {
             Ok(self.to.clone())
         } else {
-            Err("Cannot transform statement.".to_string())
+            Err(format!("Cannot transform statement: {} != {}", statement, self.from))
         }
     }
+
+    pub fn transform(&self, statement: &Statement, mapping: &HashMap<Symbol, Symbol>) -> Result<Statement, String> {
+        let mapped_statement = statement.substitute_all(mapping);
+        self.transform_strict(&mapped_statement)
+    }
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Statement {
     quantifiers: Vec<Quantifier>,
     subject: SymbolNode,
+}
+
+impl Display for Statement {
+    
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "{} {}", self.quantifiers.iter().map(|q| format!("{}", q)).collect::<Vec<_>>().join(" "), self.subject)
+        }
 }
 
 impl Statement {
@@ -44,9 +57,16 @@ impl Statement {
     }
 
     pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> Statement {
-        Statement::new(Quantifier::substitute_all(&self.quantifiers, from_symbol, to_symbol), self.subject.substitute(from_symbol, to_symbol))
+        Statement::new(Quantifier::substitute_several(&self.quantifiers, from_symbol, to_symbol), self.subject.substitute(from_symbol, to_symbol))
+    }
+
+    pub fn substitute_all(&self, mapping: &HashMap<Symbol, Symbol>) -> Statement {
+        let mut quantifiers = Quantifier::substitute_several_all(&self.quantifiers, mapping);
+        let mut subject = self.subject.clone().substitute_all(mapping);
+        Statement::new(quantifiers, subject)
     }
 }
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Quantifier {
@@ -54,6 +74,18 @@ pub enum Quantifier {
     Exists(Symbol, CompoundType),
     NotAll(Symbol, CompoundType),
     NotExists(Symbol, CompoundType),
+}
+
+impl Display for Quantifier {
+
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Quantifier::All(symbol, compound_type) => write!(f, "∀{}:{}", symbol, compound_type),
+            Quantifier::Exists(symbol, compound_type) => write!(f, "∃{}:{}", symbol, compound_type),
+            Quantifier::NotAll(symbol, compound_type) => write!(f, "¬∀{}:{}", symbol, compound_type),
+            Quantifier::NotExists(symbol, compound_type) => write!(f, "¬∃{}:{}", symbol, compound_type),
+        }
+    }
 }
 
 impl Quantifier {
@@ -67,14 +99,40 @@ impl Quantifier {
         }
     }
 
-    pub fn substitute_all(quantifiers: &Vec<Self>, from_symbol: &Symbol, to_symbol: &Symbol) -> Vec<Self> {
+    pub fn substitute_several(quantifiers: &Vec<Self>, from_symbol: &Symbol, to_symbol: &Symbol) -> Vec<Self> {
         quantifiers.iter().map(|quantifier| quantifier.substitute(from_symbol, to_symbol)).collect()
+    }
+
+    pub fn substitute_several_all(quantifiers: &Vec<Self>, mapping: &HashMap<Symbol, Symbol>) -> Vec<Self> {
+        let mut new_quantifiers = quantifiers.clone();
+        for (from_symbol, to_symbol) in mapping {
+            new_quantifiers = Quantifier::substitute_several(&new_quantifiers, &from_symbol, &to_symbol);
+        }
+        new_quantifiers
     }
 }
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct SymbolNode {
     symbol: Symbol,
     children: Vec<SymbolNode>,
+}
+
+impl Display for SymbolNode {
+    
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.symbol);
+            if !self.children.is_empty() {
+                write!(f, "(")?;
+                for (i, child) in self.children.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", child)?;
+                }
+                write!(f, ")")?;
+            }
+            Ok(())
+        }
 }
 
 impl From<Symbol> for SymbolNode {
@@ -121,10 +179,11 @@ impl SymbolNode {
     }
 
     pub fn substitute_all(&self, substitutions: &HashMap<Symbol, Symbol>) -> Self {
-        let from_to_unambiguous: HashMap<Symbol, Symbol> = substitutions.iter().enumerate().map(|(i, (from, to))| (Symbol::new(&i.to_string()), from.clone())).collect();
+        let from_to_unambiguous: HashMap<Symbol, Symbol> = substitutions.iter().enumerate().map(|(i, (from, to))| (from.clone(), Symbol::new(&i.to_string()))).collect();
         let to_to_unambiguous: HashMap<Symbol, Symbol> = substitutions.iter().enumerate().map(|(i, (from, to))| (Symbol::new(&i.to_string()), to.clone())).collect();
 
-        self.substitute_all_unchecked(&from_to_unambiguous).substitute_all_unchecked(&to_to_unambiguous)
+        let unambiguous = self.substitute_all_unchecked(&from_to_unambiguous);
+        unambiguous.substitute_all_unchecked(&to_to_unambiguous)
     }
 
     fn substitute_all_unchecked(&self, substitutions: &HashMap<Symbol, Symbol>) -> Self {
@@ -140,6 +199,12 @@ impl SymbolNode {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Symbol {
     name: String,
+}
+
+impl Display for Symbol {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 }
 
 impl From<&str> for Symbol {
@@ -162,7 +227,7 @@ mod test_statement {
     use super::*;
 
     #[test]
-    fn test_statement_transforms() {
+    fn test_statement_transforms_strictly() {
         
         let statement = Statement::new(
             vec![
@@ -199,12 +264,67 @@ mod test_statement {
 
         assert_eq!(statement, x_equals_y);
         
-        let transformed = transformation.transform(&statement).unwrap();
+        let transformed = transformation.transform_strict(&statement).unwrap();
         
         assert_eq!(transformed, x_equals_z);
 
     }
 
+    #[test]
+    fn test_statement_transforms() {
+        
+        let statement = Statement::new(
+            vec![
+                Quantifier::Exists(Symbol::new("="), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
+                Quantifier::All(Symbol::new("a"), SimpleType::Object.into()),
+                Quantifier::All(Symbol::new("b"), SimpleType::Object.into()),
+                ],
+            SymbolNode::binary(
+                "=",
+                "a",
+                "b",
+            )
+        );
+
+        let transformation = Transformation::new(
+            Statement::new(
+                vec![
+                    Quantifier::Exists("=".into(), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
+                    Quantifier::All("x".into(), SimpleType::Object.into()),
+                    Quantifier::All("y".into(), SimpleType::Object.into()),
+                ],
+                SymbolNode::new(
+                    Symbol::new("="),
+                    vec![
+                        Into::<SymbolNode>::into("x"),
+                        Into::<SymbolNode>::into("y"),
+                    ],
+                ),
+            ),
+            Statement::new(
+                vec![
+                    Quantifier::Exists("=".into(), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
+                    Quantifier::All("x".into(), SimpleType::Object.into()),
+                ],
+                SymbolNode::new(
+                    Symbol::new("="),
+                    vec![
+                        Into::<SymbolNode>::into("x"),
+                        Into::<SymbolNode>::into("x"),
+                    ],
+                ),
+            ),
+        );
+
+        let transformed = transformation.transform(
+            &statement,
+            &vec![("a".into(), "x".into()), ("b".into(), "y".into())].into_iter().collect()
+        ).unwrap();
+
+        assert_eq!(transformed, statement);
+
+    }
+    
     #[test]
     fn test_symbol_tree_substitutes() {
         
@@ -213,6 +333,14 @@ mod test_statement {
         assert_eq!(symbol_tree.substitute(&"c".into(), &"d".into()), SymbolNode::ternary("+", "a", "b", "d"));
         assert_eq!(symbol_tree.substitute(&"a".into(), &"d".into()), SymbolNode::ternary("+", "d", "b", "c"));
 
+        assert_eq!(
+            symbol_tree.substitute_all_unchecked(&vec![
+                ("a".into(), "d".into()),
+                ("b".into(), "e".into()),
+                ("c".into(), "f".into()),
+            ].into_iter().collect()),
+            SymbolNode::ternary("+", "d", "e", "f")
+        );
         assert_eq!(
             symbol_tree.substitute_all(
                 &vec![("a".into(), "d".into()), ("b".into(), "e".into()), ("c".into(), "f".into())].into_iter().collect()
@@ -239,7 +367,14 @@ mod test_statement {
             symbol_tree.substitute_all(
                 &vec![("a".into(), "b".into()), ("b".into(), "c".into())].into_iter().collect()
             ),
-            SymbolNode::ternary("+", "d", "b", "d")
+            SymbolNode::ternary("+", "b", "c", "c")
         );
+
+        assert_eq!(
+            SymbolNode::ternary("+", "2", "2", "4").substitute_all(
+                &vec![("2".into(), "4".into()), ("4".into(), "2".into())].into_iter().collect()
+            ),
+            SymbolNode::ternary("+", "4", "4", "2")
+        )
     }
 }

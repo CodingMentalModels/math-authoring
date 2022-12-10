@@ -1,3 +1,5 @@
+use std::fmt::{Formatter, Display, self};
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeHierarchyNode {
@@ -99,6 +101,21 @@ pub struct CompoundType {
     types: Vec<SimpleType>,
 }
 
+impl Display for CompoundType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        for t in self.types.iter() {
+            if first {
+                first = false;
+            } else {
+                write!(f, " x ")?;
+            }
+            write!(f, "{}", t)?;
+        }
+        Ok(())
+    }
+}
+
 impl From<SimpleType> for CompoundType {
     fn from(simple_type: SimpleType) -> Self {
         Self::simple(simple_type)
@@ -133,6 +150,15 @@ impl CompoundType {
 pub enum SimpleType {
     Object,
     Custom(String),
+}
+
+impl Display for SimpleType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            SimpleType::Object => write!(f, "Object"),
+            SimpleType::Custom(name) => write!(f, "{}", name),
+        }
+    }
 }
 
 impl From<&str> for SimpleType {
