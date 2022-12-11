@@ -1,4 +1,5 @@
-use std::{collections::{HashMap, HashSet}, fmt::{Display, Formatter, self}, error::Error};
+use std::{collections::{HashMap, HashSet}, fmt::{Display, Formatter, self}, error::Error, iter};
+use itertools::Itertools;
 
 use crate::math::types::{CompoundType};
 
@@ -69,10 +70,20 @@ impl Statement {
         let subject = self.subject.clone().substitute_all(mapping);
         Ok(Statement::new(quantifiers, subject))
     }
+
+    pub fn is_isomorphic(&self, other: &Self) -> bool {
+        let bijections = Quantifier::get_isomorphisms(&self.quantifiers, &other.quantifiers);
+
+        if bijections.len() == 0 {
+            return false;
+        }
+
+        bijections.into_iter().any(|b| self.subject.is_isomorphic_under(&other.subject, &b))
+    }
 }
 
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Quantifier {
     All(Symbol, CompoundType),
     Exists(Symbol, CompoundType),
@@ -110,6 +121,109 @@ impl Quantifier {
             Quantifier::NotAll(_, compound_type) => compound_type.clone(),
             Quantifier::NotExists(_, compound_type) => compound_type.clone(),
         }
+    }
+
+    pub fn get_isomorphisms(lhs: &Vec<Self>, rhs: &Vec<Self>) -> Vec<HashMap<Symbol, Symbol>> {
+        if lhs.len() != rhs.len() {
+            return vec![];
+        }
+        
+        Self::get_isomorphisms_internal(lhs.clone(), rhs.clone(), Vec::new()).unwrap_or_else(|_| vec![])
+    }
+
+    fn get_isomorphisms_internal(lhs: Vec<Self>, rhs: Vec<Self>, so_far: Vec<HashMap<Symbol, Symbol>>) -> Result<Vec<HashMap<Symbol, Symbol>>, String> {
+        
+        let mut thru_idx = 0;
+        loop {
+            if Self::has_same_quantifier(&lhs[thru_idx], &rhs[thru_idx]) {
+                thru_idx += 1;
+                if thru_idx == lhs.len() {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        let mut lhs_thru = lhs[0..thru_idx].to_vec();
+        let mut rhs_thru = rhs[0..thru_idx].to_vec();
+
+        let lhs_by_type = Self::group_by_type(lhs_thru.to_vec());
+        let rhs_by_type = Self::group_by_type(rhs_thru.to_vec());
+        
+        if lhs_by_type.keys().collect::<HashSet<_>>() != rhs_by_type.keys().collect::<HashSet<_>>() {
+            return Err(format!("Quantifiers have different types: {:?} vs. {:?}", lhs_by_type.keys(), rhs_by_type.keys()));
+        }
+
+        let mut new_so_far = so_far.clone();
+        for k in lhs_by_type.keys() {
+            let lhs_quantifiers = lhs_by_type.get(k).unwrap();
+            let rhs_quantifiers = rhs_by_type.get(k).unwrap();
+            if lhs_quantifiers.len() != rhs_quantifiers.len() {
+                return Err(format!("Quantifiers have different number of symbols of type {}: {:?} vs. {:?}", k, lhs_quantifiers, rhs_quantifiers));
+            }
+            let mut new_mappings: Vec<HashMap<Symbol, Symbol>> = Vec::new();
+            if lhs_quantifiers.len() == 1 {
+                let lhs_symbol = lhs_quantifiers[0].get_symbol();
+                let rhs_symbol = rhs_quantifiers[0].get_symbol();
+                new_mappings = vec![vec![(lhs_symbol, rhs_symbol)].into_iter().collect::<HashMap<_, _>>()];
+            } else {
+                if lhs_quantifiers[0].is_reorderable() {
+                    let permutations = Self::get_symbol_permutations(rhs_quantifiers.clone());
+                    let lhs_symbols = lhs_quantifiers.into_iter().map(|x| x.get_symbol()).collect();
+                    let lhs_basis: Vec<Vec<Symbol>> = iter::repeat(lhs_symbols).take(permutations.len()).collect();
+                    new_mappings = lhs_basis.into_iter().zip(permutations).map(|(l, r)| l.into_iter().zip(r).collect()).collect();
+                } else {
+                    return Err(format!("Quantifiers are not reorderable: {:?} vs. {:?}", lhs_quantifiers, rhs_quantifiers));
+                }
+            }
+            if new_so_far.len() == 0 && new_mappings.len() > 0 {
+                new_so_far.push(HashMap::new());
+            }
+            new_so_far = new_so_far.iter().map(
+                |m| new_mappings.iter().map(
+                    |mapping| {
+                        let mut m_clone = m.clone();
+                        m_clone.extend(mapping.clone());
+                        return m_clone;
+                    }
+                ).collect::<Vec<HashMap<_, _>>>()
+            ).flatten().collect();
+        }
+        return Ok(new_so_far);
+    }
+
+    fn group_by_type(quantifiers: Vec<Self>) -> HashMap<CompoundType, Vec<Self>> {
+        let mut map = HashMap::new();
+        for quantifier in quantifiers {
+            let entry = map.entry(quantifier.get_type()).or_insert_with(|| vec![]);
+            entry.push(quantifier);
+        }
+        map
+    }
+
+    fn has_same_quantifier(lhs: &Quantifier, rhs: &Quantifier) -> bool {
+        match (lhs, rhs) {
+            (Quantifier::All(_, _), Quantifier::All(_, _)) => true,
+            (Quantifier::Exists(_, _), Quantifier::Exists(_, _)) => true,
+            (Quantifier::NotAll(_, _), Quantifier::NotAll(_, _)) => true,
+            (Quantifier::NotExists(_, _), Quantifier::NotExists(_, _)) => true,
+            _ => false,
+        }
+    }
+
+    fn is_reorderable(&self) -> bool {
+        match self {
+            Quantifier::All(_, _) => true,
+            Quantifier::Exists(_, _) => false,
+            Quantifier::NotAll(_, _) => false,
+            Quantifier::NotExists(_, _) => true,
+        }
+    }
+
+    fn get_symbol_permutations(quantifiers: Vec<Self>) -> Vec<Vec<Symbol>> {
+        let quantifiers_length = quantifiers.len();
+        quantifiers.into_iter().map(|x| x.get_symbol()).permutations(quantifiers_length).collect()
     }
 
     pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> Quantifier {
@@ -228,6 +342,14 @@ impl SymbolNode {
         SymbolNode::new(symbol.into(), vec![left.into(), middle.into(), right.into()])
     }
 
+    pub fn get_isomorphisms(&self, other: &SymbolNode, potential_bijections: &Vec<HashMap<Symbol, Symbol>>) -> Vec<HashMap<Symbol, Symbol>> {
+        potential_bijections.iter().filter(|bijection| self.is_isomorphic_under(other, bijection)).map(|bijection| bijection.clone()).collect()
+    }
+
+    pub fn is_isomorphic_under(&self, other: &SymbolNode, bijection: &HashMap<Symbol, Symbol>) -> bool {
+        self.substitute_all(bijection) == *other
+    }
+
     pub fn substitute(&self, from_symbol: &Symbol, to_symbol: &Symbol) -> SymbolNode {
         let contents = if self.symbol == *from_symbol {
             to_symbol.clone()
@@ -255,7 +377,7 @@ impl SymbolNode {
 
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Symbol {
     name: String,
 }
@@ -399,6 +521,86 @@ mod test_statement {
     }
 
     #[test]
+    fn test_statement_is_isomorphic() {
+        
+        let statement = Statement::new(
+            vec![
+                Quantifier::Exists(Symbol::new("="), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
+                Quantifier::All(Symbol::new("x"), SimpleType::Object.into()),
+                Quantifier::All(Symbol::new("y"), SimpleType::Object.into()),
+            ],
+            SymbolNode::binary(
+                "=",
+                "x",
+                "y",
+            )
+        );
+
+        assert!(statement.is_isomorphic(&statement));
+
+        let statement2 = Statement::new(
+            vec![
+                Quantifier::Exists(Symbol::new("="), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
+                Quantifier::All(Symbol::new("a"), SimpleType::Object.into()),
+                Quantifier::All(Symbol::new("b"), SimpleType::Object.into()),
+            ],
+            SymbolNode::binary(
+                "=",
+                "a",
+                "b",
+            )
+        );
+
+        assert!(statement.is_isomorphic(&statement2));
+
+        let different_by_symbol = Statement::new(
+            vec![
+                Quantifier::Exists(Symbol::new("="), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
+                Quantifier::All(Symbol::new("a"), SimpleType::Object.into()),
+                Quantifier::All(Symbol::new("b"), SimpleType::Object.into()),
+            ],
+            SymbolNode::binary(
+                "=",
+                "a",
+                "a",
+            )
+        );
+
+        assert!(!statement.is_isomorphic(&different_by_symbol));
+
+        let different_by_quantifier = Statement::new(
+            vec![
+                Quantifier::Exists(Symbol::new("="), CompoundType::new(vec![SimpleType::Object, SimpleType::Object])),
+                Quantifier::Exists(Symbol::new("a"), SimpleType::Object.into()),
+                Quantifier::All(Symbol::new("b"), SimpleType::Object.into()),
+            ],
+            SymbolNode::binary(
+                "=",
+                "a",
+                "b",
+            )
+        );
+
+        assert!(!statement.is_isomorphic(&different_by_quantifier));
+
+        let different_by_type = Statement::new(
+            vec![
+                Quantifier::Exists(Symbol::new("="), CompoundType::new(vec![SimpleType::Object, SimpleType::Object, SimpleType::Object])),
+                Quantifier::All(Symbol::new("a"), SimpleType::Object.into()),
+                Quantifier::All(Symbol::new("b"), SimpleType::Object.into()),
+            ],
+            SymbolNode::binary(
+                "=",
+                "a",
+                "b",
+            )
+        );
+
+        assert!(!statement.is_isomorphic(&different_by_type));
+        
+    }
+
+    #[test]
     fn test_statement_substitutes() {
         
         let statement = Statement::new(
@@ -537,5 +739,104 @@ mod test_statement {
             ),
             SymbolNode::ternary("+", "4", "4", "2")
         )
+    }
+
+    #[test]
+    fn test_quantifier_is_isomorphic() {
+
+        let single_quantifier = vec![
+            Quantifier::All("x".into(), SimpleType::Object.into()),
+        ];
+        
+        let bijections = Quantifier::get_isomorphisms(&single_quantifier, &single_quantifier);
+        assert_eq!(bijections.len(), 1);
+        assert_eq!(bijections[0], vec![("x".into(), "x".into())].into_iter().collect());
+
+        let other_single_quantifier = vec![
+            Quantifier::All("y".into(), SimpleType::Object.into()),
+        ];
+        let bijections = Quantifier::get_isomorphisms(&single_quantifier, &other_single_quantifier);
+        assert_eq!(bijections.len(), 1);
+        assert_eq!(bijections[0], vec![("x".into(), "y".into())].into_iter().collect());
+
+        let wrong_type = vec![
+            Quantifier::All("x".into(), "Number".into()),
+        ];
+        let bijections = Quantifier::get_isomorphisms(&single_quantifier, &wrong_type);
+        assert_eq!(bijections.len(), 0);
+
+        let wrong_quantifier = vec![
+            Quantifier::Exists("x".into(), SimpleType::Object.into()),
+        ];
+        let bijections = Quantifier::get_isomorphisms(&single_quantifier, &wrong_quantifier);
+        assert_eq!(bijections.len(), 0);
+
+        let quantifiers = vec![
+            Quantifier::All("x".into(), SimpleType::Object.into()),
+            Quantifier::All("y".into(), SimpleType::Object.into()),
+            Quantifier::All("z".into(), SimpleType::Object.into()),
+        ];
+
+        let bijections = Quantifier::get_isomorphisms(&quantifiers, &quantifiers);
+        assert_eq!(bijections.len(), 6);
+
+        let isomorphic = vec![
+            Quantifier::All("a".into(), SimpleType::Object.into()),
+            Quantifier::All("b".into(), SimpleType::Object.into()),
+            Quantifier::All("c".into(), SimpleType::Object.into()),
+        ];
+
+        let bijections = Quantifier::get_isomorphisms(&quantifiers, &isomorphic);
+        assert_eq!(bijections.len(), 6);
+
+        let quantifiers = vec![
+            Quantifier::All("x".into(), SimpleType::Object.into()),
+            Quantifier::All("y".into(), SimpleType::Object.into()),
+            Quantifier::All("z".into(), "Number".into()),
+        ];
+
+        let isomorphic = vec![
+            Quantifier::All("a".into(), SimpleType::Object.into()),
+            Quantifier::All("b".into(), SimpleType::Object.into()),
+            Quantifier::All("c".into(), "Number".into()),
+        ];
+
+        let bijections = Quantifier::get_isomorphisms(&quantifiers, &isomorphic);
+        assert_eq!(bijections.len(), 2);
+    }
+
+    #[test]
+    fn test_quantifier_is_isomorphic_with_reconciliation() {
+        
+        let quantifiers = vec![
+            Quantifier::All("x".into(), SimpleType::Object.into()),
+            Quantifier::All("y".into(), "Number".into()),
+            Quantifier::All("z".into(), SimpleType::Object.into()),
+        ];
+
+        let isomorphic = vec![
+            Quantifier::All("a".into(), SimpleType::Object.into()),
+            Quantifier::All("b".into(), SimpleType::Object.into()),
+            Quantifier::All("c".into(), "Number".into()),
+        ];
+
+        let bijections = Quantifier::get_isomorphisms(&quantifiers, &isomorphic);
+        assert_eq!(bijections.len(), 2);
+
+        let quantifiers = vec![
+            Quantifier::NotAll("x".into(), SimpleType::Object.into()),
+            Quantifier::NotAll("y".into(), "Number".into()),
+            Quantifier::NotAll("z".into(), SimpleType::Object.into()),
+        ];
+
+        let wrong_type = vec![
+            Quantifier::NotAll("a".into(), SimpleType::Object.into()),
+            Quantifier::NotAll("b".into(), SimpleType::Object.into()),
+            Quantifier::NotAll("c".into(), "Number".into()),
+        ];
+
+        let bijections = Quantifier::get_isomorphisms(&quantifiers, &wrong_type);
+        assert_eq!(bijections.len(), 0);
+
     }
 }
